@@ -26,7 +26,7 @@ import warnings
 import zmq
 from datetime import datetime
 
-from parl.utils import get_ip_address, to_byte, to_str, logger, _IS_WINDOWS
+from parl.utils import get_ip_address, to_byte, to_str, logger, _IS_WINDOWS, kill_process
 from parl.remote import remote_constants
 from parl.remote.message import InitializedWorker
 from parl.remote.status import WorkerStatus
@@ -78,6 +78,7 @@ class Worker(object):
 
         # create a thread that waits commands from the job to kill the job.
         self.kill_job_thread = threading.Thread(target=self._reply_kill_job)
+        self.kill_job_thread.setDaemon(True)
         self.kill_job_thread.start()
 
         self._create_jobs()
@@ -169,6 +170,7 @@ class Worker(object):
 
     def _fill_job_buffer(self):
         """An endless loop that adds initialized job into the job buffer"""
+        initialized_jobs = []
         while self.worker_is_alive:
             if self.job_buffer.full() is False:
                 job_num = self.cpu_num - self.job_buffer.qsize()
@@ -178,13 +180,7 @@ class Worker(object):
                         self.job_buffer.put(job)
 
             time.sleep(0.02)
-
-        # release jobs if the worker is not alive
-        for job in initialized_jobs:
-            try:
-                os.kill(job.pid, signal.SIGTERM)
-            except OSError:
-                pass
+        self.exit()
 
     def _init_jobs(self, job_num):
         """Create jobs.
@@ -223,6 +219,7 @@ class Worker(object):
             # a thread for sending heartbeat signals to job
             thread = threading.Thread(
                 target=self._create_job_monitor, args=(initialized_job, ))
+            thread.setDaemon(True)
             thread.start()
         self.lock.release()
         assert len(new_jobs) > 0, "init jobs failed"
@@ -354,15 +351,17 @@ class Worker(object):
                 break
         socket.close(0)
         logger.warning(
-            "[Worker] lost connection with the master, will exit replying heartbeat for master."
+            "[Worker] lost connection with the master, will exit reply heartbeat for master."
         )
         self.worker_status.clear()
         # exit the worker
         self.worker_is_alive = False
+        self.exit()
 
     def exit(self):
         """close the worker"""
         self.worker_is_alive = False
+        kill_process('remote/job.py.*{}'.format(self.reply_job_address))
 
     def run(self):
         """Keep running until it lost connection with the master.

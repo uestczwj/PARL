@@ -105,9 +105,19 @@ class Client(object):
 
             for file in distributed_files:
                 assert os.path.exists(file)
+                assert not os.path.isabs(
+                    file
+                ), "[XPARL] Please do not distribute a file with absolute path."
                 with open(file, 'rb') as f:
                     content = f.read()
                     pyfiles['other_files'][file] = content
+            # append entry file to code list
+            main_file = sys.argv[0]
+            with open(main_file, 'rb') as code_file:
+                code = code_file.read()
+                # parl/remote/remote_decorator.py -> remote_decorator.py
+                file_name = main_file.split(os.sep)[-1]
+                pyfiles['python_files'][file_name] = code
         except AssertionError as e:
             raise Exception(
                 'Failed to create the client, the file {} does not exist.'.
@@ -161,6 +171,7 @@ class Client(object):
         self.heartbeat_master_address = "{}:{}".format(get_ip_address(),
                                                        heartbeat_master_port)
         self.heartbeat_socket_initialized.set()
+        connected = False
         while self.client_is_alive and self.master_is_alive:
             try:
                 message = socket.recv_multipart()
@@ -172,9 +183,16 @@ class Client(object):
                     to_byte(str(self.actor_num)),
                     to_byte(str(elapsed_time))
                 ])
+                connected = True
             except zmq.error.Again as e:
-                logger.warning("[Client] Cannot connect to the master."
-                               "Please check if it is still alive.")
+                if connected:
+                    logger.warning("[Client] Cannot connect to the master."
+                                   "Please check if it is still alive.")
+                else:
+                    logger.warning(
+                        "[Client] Cannot connect to the master."
+                        "Please check the firewall between client and master.(e.g., ping the master IP)"
+                    )
                 self.master_is_alive = False
         socket.close(0)
         logger.warning("Client exit replying heartbeat for master.")
@@ -326,9 +344,10 @@ def connect(master_address, distributed_files=[]):
         Exception: An exception is raised if the master node is not started.
     """
 
-    assert len(master_address.split(":")) == 2, "please input address in " +\
+    assert len(master_address.split(":")) == 2, "Please input address in " +\
         "{ip}:{port} format"
     global GLOBAL_CLIENT
+    addr = master_address.split(":")[0]
     cur_process_id = os.getpid()
     if GLOBAL_CLIENT is None:
         GLOBAL_CLIENT = Client(master_address, cur_process_id,
@@ -366,5 +385,5 @@ def disconnect():
         GLOBAL_CLIENT = None
     else:
         logger.info(
-            "No client to be released. Please make sure that you have call `parl.connect`"
+            "No client to be released. Please make sure that you have called `parl.connect`"
         )

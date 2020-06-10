@@ -1,4 +1,4 @@
-#   Copyright (c) 2018 PaddlePaddle Authors. All Rights Reserved.
+#   Copyright (c) 2020 PaddlePaddle Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,14 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+os.environ['XPARL'] = 'True'
+import parl
+import unittest
 
 
-# A dev image based on paddle production image
+@parl.remote_class(max_memory=350)
+class Actor(object):
+    def __init__(self, x=10):
+        self.x = x
+        self.data = []
 
-FROM parl/parl-test:cuda9.0-cudnn7-v2
+    def add_500mb(self):
+        self.data.append(os.urandom(500 * 1024**2))
+        self.x += 1
+        return self.x
 
-COPY ./requirements.txt /root/
 
-RUN apt-get install -y libgflags-dev libgoogle-glog-dev libomp-dev unzip
-RUN apt-get install -y libgtest-dev && cd /usr/src/gtest && mkdir build \
-	&& cd build && cmake .. && make  && cp libgtest*.a /usr/local/lib
+class TestLocalActor(unittest.TestCase):
+    def test_create_actors_without_pre_connection(self):
+        actor = Actor()
+
+
+if __name__ == '__main__':
+    unittest.main()
